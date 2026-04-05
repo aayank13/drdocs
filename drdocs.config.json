@@ -1,0 +1,19 @@
+{
+  "name": "DrDocs",
+  "description": "Open-source documentation built with DrDocs",
+  "theme": {
+    "primaryColor": "#6366f1",
+    "font": "Inter",
+    "mode": "light"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": ["introduction", "getting-started"]
+    }
+  ],
+  "search": true,
+  "versions": [],
+  "favicon": "/public/favicon.ico",
+  "logo": "/public/logo.png"
+}

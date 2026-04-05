@@ -1,0 +1,23 @@
+{
+  "name": "@drdocs/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "drdocs": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  },
+  "dependencies": {
+    "@drdocs/core": "workspace:*",
+    "chalk": "^5.4.1",
+    "chokidar": "^4.0.3",
+    "commander": "^13.1.0",
+    "open": "^10.1.2",
+    "ora": "^8.2.0",
+    "ws": "^8.18.3"
+  }
+}
