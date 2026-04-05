@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"gray-matter": "^4.0.3",
+		"shiki": "^1.29.2",
 		"rehype-stringify": "^10.0.1",
 		"remark-gfm": "^4.0.1",
 		"remark-mdx": "^3.1.0",

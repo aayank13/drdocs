@@ -2,13 +2,14 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { extname } from 'node:path';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Command } from 'commander';
 import chokidar from 'chokidar';
 import ora from 'ora';
 import chalk from 'chalk';
 import open from 'open';
+import inquirer from 'inquirer';
 import WebSocket, { WebSocketServer } from 'ws';
 import { buildSinglePage, buildSite } from '@drdocs/core';
 
@@ -27,6 +28,32 @@ const contentTypeByExtension: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.txt': 'text/plain; charset=utf-8'
 };
+
+const defaultIntro = `---
+title: Introduction
+description: Start here
+---
+
+# Introduction
+
+Welcome to your DrDocs project.
+`;
+
+const defaultGettingStarted = `---
+title: Getting Started
+description: Build and preview your docs
+---
+
+# Getting Started
+
+Run the commands below:
+
+\`\`\`bash
+pnpm install
+pnpm build
+node packages/cli/dist/index.js dev
+\`\`\`
+`;
 
 const injectLiveReload = (html: string, wsPort: number): string => {
   const script = `<script>
@@ -84,14 +111,13 @@ const handleRequest = async (
 
   try {
     let body = await readFile(filePath);
-    let status = 200;
 
     if (extname(filePath) === '.html') {
       const html = injectLiveReload(body.toString('utf8'), wsPort);
       body = Buffer.from(html, 'utf8');
     }
 
-    res.writeHead(status, {
+    res.writeHead(200, {
       'Content-Type': contentTypeByExtension[extname(filePath)] ?? 'application/octet-stream',
       'Cache-Control': 'no-cache'
     });
@@ -113,10 +139,32 @@ const handleRequest = async (
   }
 };
 
-program
-  .name('drdocs')
-  .description('DrDocs CLI')
-  .version('0.1.0');
+const slugify = (value: string): string =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+const writeJson = async (filePath: string, value: unknown): Promise<void> => {
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+};
+
+const ensureBuild = async (root: string, spinnerText: string): Promise<boolean> => {
+  const spinner = ora(spinnerText).start();
+  try {
+    await buildSite(root);
+    spinner.succeed(chalk.green('Build complete. Output written to dist/.'));
+    return true;
+  } catch (error) {
+    spinner.fail(chalk.red('Build failed.'));
+    console.error(error instanceof Error ? error.message : error);
+    return false;
+  }
+};
+
+program.name('drdocs').description('DrDocs CLI').version('0.1.0');
 
 program
   .command('build')
@@ -124,27 +172,97 @@ program
   .option('-r, --root <path>', 'Project root path', process.cwd())
   .action(async (options: { root: string }) => {
     const root = path.resolve(options.root);
-    const spinner = ora(`Building DrDocs site in ${root}`).start();
-
-    try {
-      await buildSite(root);
-      spinner.succeed(chalk.green('Build complete. Output written to dist/.'));
-    } catch (error) {
-      spinner.fail(chalk.red('Build failed.'));
-      if (error instanceof Error) {
-        console.error(error.message);
-      } else {
-        console.error(error);
-      }
+    const ok = await ensureBuild(root, `Building DrDocs site in ${root}`);
+    if (!ok) {
       process.exitCode = 1;
     }
   });
 
 program
   .command('init')
-  .description('Scaffold a new DrDocs project (coming soon)')
-  .action(() => {
-    console.log(chalk.yellow('init is not implemented yet in this MVP.'));
+  .description('Scaffold a new DrDocs project')
+  .option('-r, --root <path>', 'Target folder', process.cwd())
+  .action(async (options: { root: string }) => {
+    const root = path.resolve(options.root);
+
+    const answers = await inquirer.prompt([
+      { type: 'input', name: 'name', message: 'Project name:', default: 'My Project' },
+      { type: 'input', name: 'description', message: 'Project description:', default: 'Project docs' },
+      { type: 'input', name: 'primaryColor', message: 'Theme primary color:', default: '#6366f1' },
+      { type: 'input', name: 'logo', message: 'Logo path (optional):', default: '/public/logo.png' },
+      {
+        type: 'list',
+        name: 'aiProvider',
+        message: 'AI provider:',
+        choices: ['openai', 'anthropic', 'gemini', 'skip'],
+        default: 'skip'
+      },
+      { type: 'password', name: 'apiKey', message: 'AI API key (optional):', mask: '*' },
+      { type: 'input', name: 'analyticsId', message: 'Analytics ID (optional):', default: '' },
+      {
+        type: 'list',
+        name: 'deployTarget',
+        message: 'Deploy target:',
+        choices: ['github', 'cloudflare', 'vercel', 'manual'],
+        default: 'github'
+      }
+    ]);
+
+    await mkdir(path.join(root, 'docs'), { recursive: true });
+    await mkdir(path.join(root, 'public'), { recursive: true });
+    await mkdir(path.join(root, 'openapi'), { recursive: true });
+
+    await writeFile(path.join(root, 'docs', 'introduction.mdx'), defaultIntro, 'utf8');
+    await writeFile(path.join(root, 'docs', 'getting-started.mdx'), defaultGettingStarted, 'utf8');
+    await writeFile(path.join(root, 'openapi', 'openapi.yaml'), 'openapi: 3.1.0\ninfo:\n  title: API\n  version: 1.0.0\npaths: {}\n', 'utf8');
+
+    const config = {
+      name: answers.name,
+      description: answers.description,
+      theme: {
+        primaryColor: answers.primaryColor,
+        font: 'inter',
+        mode: 'light'
+      },
+      navigation: [
+        {
+          group: 'Getting Started',
+          pages: ['introduction', 'getting-started']
+        }
+      ],
+      ai: {
+        enabled: answers.aiProvider !== 'skip',
+        provider: answers.aiProvider,
+        model: answers.aiProvider === 'skip' ? '' : 'gpt-4o-mini'
+      },
+      analytics: answers.analyticsId
+        ? {
+            provider: 'google',
+            id: answers.analyticsId
+          }
+        : undefined,
+      search: true,
+      versions: [],
+      favicon: '/public/favicon.ico',
+      logo: answers.logo,
+      deploy: {
+        target: answers.deployTarget
+      }
+    };
+
+    await writeJson(path.join(root, 'drdocs.config.json'), config);
+
+    const envLines = [
+      `AI_PROVIDER=${answers.aiProvider}`,
+      `AI_API_KEY=${answers.apiKey ?? ''}`,
+      `ANALYTICS_ID=${answers.analyticsId ?? ''}`,
+      `DEPLOY_TARGET=${answers.deployTarget}`
+    ];
+    await writeFile(path.join(root, '.env'), `${envLines.join('\n')}\n`, 'utf8');
+
+    await writeFile(path.join(root, '.gitignore'), 'node_modules\ndist\n.env\n.DS_Store\n', 'utf8');
+
+    console.log(chalk.green(`DrDocs project initialized at ${root}`));
   });
 
 program
@@ -299,6 +417,69 @@ program
     process.on('SIGTERM', () => {
       void shutdown();
     });
+  });
+
+const addCommand = program.command('add').description('Add docs resources');
+
+addCommand
+  .command('page <name>')
+  .description('Create a new .mdx page')
+  .option('-r, --root <path>', 'Project root path', process.cwd())
+  .action(async (name: string, options: { root: string }) => {
+    const root = path.resolve(options.root);
+    const slug = slugify(name);
+    const filePath = path.join(root, 'docs', `${slug}.mdx`);
+    const content = `---\ntitle: ${name}\ndescription: ${name}\n---\n\n# ${name}\n`;
+    await writeFile(filePath, content, 'utf8');
+    console.log(chalk.green(`Created ${filePath}`));
+  });
+
+addCommand
+  .command('group <name>')
+  .description('Create a new docs group folder')
+  .option('-r, --root <path>', 'Project root path', process.cwd())
+  .action(async (name: string, options: { root: string }) => {
+    const root = path.resolve(options.root);
+    const folder = path.join(root, 'docs', slugify(name));
+    await mkdir(folder, { recursive: true });
+    console.log(chalk.green(`Created ${folder}`));
+  });
+
+addCommand
+  .command('api-ref')
+  .description('Create openapi/openapi.yaml scaffold')
+  .option('-r, --root <path>', 'Project root path', process.cwd())
+  .action(async (options: { root: string }) => {
+    const root = path.resolve(options.root);
+    await mkdir(path.join(root, 'openapi'), { recursive: true });
+    await writeFile(path.join(root, 'openapi', 'openapi.yaml'), 'openapi: 3.1.0\ninfo:\n  title: API\n  version: 1.0.0\npaths: {}\n', 'utf8');
+    console.log(chalk.green('Created openapi/openapi.yaml'));
+  });
+
+program
+  .command('deploy')
+  .description('Build docs for deployment (provider-specific adapters coming next)')
+  .option('-r, --root <path>', 'Project root path', process.cwd())
+  .option('--github', 'Prepare for GitHub Pages')
+  .option('--cloudflare', 'Prepare for Cloudflare Pages')
+  .option('--vercel', 'Prepare for Vercel')
+  .option('--netlify', 'Prepare for Netlify')
+  .action(async (options: { root: string }) => {
+    const root = path.resolve(options.root);
+    const ok = await ensureBuild(root, `Preparing deployment build in ${root}`);
+    if (!ok) {
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(chalk.cyan('Build prepared. Publish dist/ on your selected platform.'));
+  });
+
+program
+  .command('upgrade')
+  .description('Show upgrade guidance for DrDocs CLI')
+  .action(() => {
+    console.log(chalk.cyan('Upgrade command is available. Use your package manager to update workspace dependencies.'));
   });
 
 program.parseAsync(process.argv);

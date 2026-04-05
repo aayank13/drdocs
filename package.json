@@ -6,10 +6,18 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "pnpm -r build",
+    "dev": "node packages/cli/dist/index.js dev",
+    "drdocs": "node packages/cli/dist/index.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "changeset": "changeset",
     "cli": "pnpm --filter @drdocs/cli drdocs"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.7",
     "@types/node": "^22.13.10",
+    "eslint": "^9.24.0",
+    "prettier": "^3.5.3",
     "typescript": "^5.8.2"
   }
 }
